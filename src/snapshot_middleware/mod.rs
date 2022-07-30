@@ -30,8 +30,8 @@ use self::{
     json_model::snapshot_json_model,
     lua::{snapshot_lua, snapshot_lua_init},
     project::snapshot_project,
-    rbxm::snapshot_rbxm,
-    rbxmx::snapshot_rbxmx,
+    rbxm::{snapshot_rbxm, snapshot_rbxm_init},
+    rbxmx::{snapshot_rbxmx, snapshot_rbxmx_init},
     txt::snapshot_txt,
     util::PathExt,
 };
@@ -91,6 +91,14 @@ pub fn snapshot_from_vfs(
         if vfs.metadata(&init_path).with_not_found()?.is_some() {
             return snapshot_csv_init(context, vfs, &init_path);
         }
+        let init_path = path.join("init.rbxm");
+        if vfs.metadata(&init_path).with_not_found()?.is_some() {
+            return snapshot_rbxm_init(context, vfs, &init_path);
+        }
+        let init_path = path.join("init.rbxmx");
+        if vfs.metadata(&init_path).with_not_found()?.is_some() {
+            return snapshot_rbxmx_init(context, vfs, &init_path);
+        }
 
         snapshot_dir(context, vfs, path)
     } else {
@@ -99,6 +107,8 @@ pub fn snapshot_from_vfs(
             .or_else(|_| path.file_name_trim_end(".luau"));
 
         let csv_name = path.file_name_trim_end(".csv");
+        let rbxmx_name = path.file_name_trim_end(".rbxmx");
+        let rbxm_name = path.file_name_trim_end(".rbxm");
 
         if let Ok(name) = script_name {
             match name {
@@ -127,10 +137,22 @@ pub fn snapshot_from_vfs(
             }
         } else if path.file_name_ends_with(".txt") {
             return snapshot_txt(context, vfs, path);
-        } else if path.file_name_ends_with(".rbxmx") {
-            return snapshot_rbxmx(context, vfs, path);
-        } else if path.file_name_ends_with(".rbxm") {
-            return snapshot_rbxm(context, vfs, path);
+        } else if let Ok(name) = rbxmx_name {
+            match name {
+                // init csv are handled elsewhere and should not turn into
+                // their own children.
+                "init" => return Ok(None),
+
+                _ => return snapshot_rbxmx(context, vfs, path),
+            }
+        } else if let Ok(name) = rbxm_name {
+            match name {
+                // init csv are handled elsewhere and should not turn into
+                // their own children.
+                "init" => return Ok(None),
+
+                _ => return snapshot_rbxm(context, vfs, path),
+            }
         }
 
         Ok(None)

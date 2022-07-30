@@ -21,6 +21,8 @@ macro_rules! gen_build_tests {
 }
 
 gen_build_tests! {
+    init_rbxmx_with_children_in_init,
+    init_rbxm_with_children_in_init,
     init_csv_with_children,
     attributes,
     client_in_folder,

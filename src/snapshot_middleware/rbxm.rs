@@ -5,8 +5,10 @@ use memofs::Vfs;
 
 use crate::snapshot::{InstanceContext, InstanceMetadata, InstanceSnapshot};
 
-use super::util::PathExt;
-
+use super::{
+    dir::{dir_meta, snapshot_dir_no_meta},
+    util::PathExt,
+};
 #[profiling::function]
 pub fn snapshot_rbxm(
     context: &InstanceContext,
@@ -40,6 +42,38 @@ pub fn snapshot_rbxm(
             path.display()
         );
     }
+}
+
+pub fn snapshot_rbxm_init(
+    context: &InstanceContext,
+    vfs: &Vfs,
+    init_path: &Path,
+) -> anyhow::Result<Option<InstanceSnapshot>> {
+    let folder_path = init_path.parent().unwrap();
+    let dir_snapshot = snapshot_dir_no_meta(context, vfs, folder_path)?.unwrap();
+
+    if dir_snapshot.class_name != "Folder" {
+        anyhow::bail!(
+            "init.csv can only be used if the instance produced by \
+             the containing directory would be a Folder.\n\
+             \n\
+             The directory {} turned into an instance of class {}.",
+            folder_path.display(),
+            dir_snapshot.class_name
+        );
+    }
+
+    let mut init_snapshot = snapshot_rbxm(context, vfs, init_path)?.unwrap();
+    let children = [init_snapshot.children, dir_snapshot.children].concat();
+    init_snapshot.name = dir_snapshot.name;
+    init_snapshot.children = children;
+    init_snapshot.metadata = dir_snapshot.metadata;
+
+    if let Some(mut meta) = dir_meta(vfs, folder_path)? {
+        meta.apply_all(&mut init_snapshot)?;
+    }
+
+    Ok(Some(init_snapshot))
 }
 
 #[cfg(test)]
