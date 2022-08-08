@@ -37,6 +37,9 @@ pub struct InstanceSnapshot {
     ///
     /// Order is relevant for Roblox instances!
     pub children: Vec<InstanceSnapshot>,
+
+    //Special for folders to check if the children need to be checked by compute_children_patches
+    pub max_depth_reached: bool
 }
 
 impl InstanceSnapshot {
@@ -48,6 +51,7 @@ impl InstanceSnapshot {
             class_name: Cow::Borrowed("DEFAULT"),
             properties: HashMap::new(),
             children: Vec::new(),
+            max_depth_reached: false,
         }
     }
 
@@ -84,6 +88,12 @@ impl InstanceSnapshot {
     pub fn children(self, children: impl Into<Vec<Self>>) -> Self {
         Self {
             children: children.into(),
+            ..self
+        }
+    }
+    pub fn max_depth_reached(self, max_depth_reached: bool) -> Self {
+        Self {
+            max_depth_reached,
             ..self
         }
     }

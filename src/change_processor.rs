@@ -286,8 +286,9 @@ fn compute_and_apply_changes(tree: &mut RojoTree, vfs: &Vfs, id: Ref) -> Option<
                 // Our instance was previously created from a path and that
                 // path still exists. We can generate a snapshot starting at
                 // that path and use it as the source for our patch.
+                print!(path)
 
-                let snapshot = match snapshot_from_vfs(&metadata.context, &vfs, &path) {
+                let snapshot = match snapshot_from_vfs(&metadata.context, &vfs, &path, Some(1)) {
                     Ok(snapshot) => snapshot,
                     Err(err) => {
                         log::error!("Snapshot error: {:?}", err);

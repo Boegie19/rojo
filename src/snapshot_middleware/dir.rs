@@ -10,8 +10,9 @@ pub fn snapshot_dir(
     context: &InstanceContext,
     vfs: &Vfs,
     path: &Path,
+    max_depth: Option<u8>
 ) -> anyhow::Result<Option<InstanceSnapshot>> {
-    let mut snapshot = match snapshot_dir_no_meta(context, vfs, path)? {
+    let mut snapshot = match snapshot_dir_no_meta(context, vfs, path,max_depth)? {
         Some(snapshot) => snapshot,
         None => return Ok(None),
     };
@@ -25,7 +26,7 @@ pub fn snapshot_dir(
 
 /// Retrieves the meta file that should be applied for this directory, if it
 /// exists.
-pub fn dir_meta(vfs: &Vfs, path: &Path) -> anyhow::Result<Option<DirectoryMetadata>> {
+pub fn dir_meta(vfs: &Vfs, path: &Path,) -> anyhow::Result<Option<DirectoryMetadata>> {
     let meta_path = path.join("init.meta.json");
 
     if let Some(meta_contents) = vfs.read(&meta_path).with_not_found()? {
@@ -44,6 +45,7 @@ pub fn snapshot_dir_no_meta(
     context: &InstanceContext,
     vfs: &Vfs,
     path: &Path,
+    mut max_depth: Option<u8>
 ) -> anyhow::Result<Option<InstanceSnapshot>> {
     let passes_filter_rules = |child: &DirEntry| {
         context
@@ -53,19 +55,26 @@ pub fn snapshot_dir_no_meta(
     };
 
     let mut snapshot_children = Vec::new();
-
-    for entry in vfs.read_dir(path)? {
-        let entry = entry?;
-
-        if !passes_filter_rules(&entry) {
-            continue;
+    let mut max_depth_reached = false;
+    if let Some(max_depth_count) = max_depth {
+        if max_depth_count == 0 {
+            max_depth_reached = true
         }
+        max_depth = Some(max_depth_count - 1)
+    }
+    if !max_depth_reached{
+        for entry in vfs.read_dir(path)? {
+            let entry = entry?;
 
-        if let Some(child_snapshot) = snapshot_from_vfs(context, vfs, entry.path())? {
-            snapshot_children.push(child_snapshot);
+            if !passes_filter_rules(&entry) {
+                continue;
+            }
+
+            if let Some(child_snapshot) = snapshot_from_vfs(context, vfs, entry.path(), max_depth)? {
+                snapshot_children.push(child_snapshot);
+            }
         }
     }
-
     let instance_name = path
         .file_name()
         .expect("Could not extract file name")
@@ -94,6 +103,7 @@ pub fn snapshot_dir_no_meta(
         .name(instance_name)
         .class_name("Folder")
         .children(snapshot_children)
+        .max_depth_reached(max_depth_reached)
         .metadata(
             InstanceMetadata::new()
                 .instigating_source(path)
@@ -120,7 +130,7 @@ mod test {
         let mut vfs = Vfs::new(imfs);
 
         let instance_snapshot =
-            snapshot_dir(&InstanceContext::default(), &mut vfs, Path::new("/foo"))
+            snapshot_dir(&InstanceContext::default(), &mut vfs, Path::new("/foo"), None)
                 .unwrap()
                 .unwrap();
 

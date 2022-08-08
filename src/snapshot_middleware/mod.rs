@@ -45,6 +45,7 @@ pub fn snapshot_from_vfs(
     context: &InstanceContext,
     vfs: &Vfs,
     path: &Path,
+    max_depth: Option<u8>
 ) -> anyhow::Result<Option<InstanceSnapshot>> {
     let meta = match vfs.metadata(path).with_not_found()? {
         Some(meta) => meta,
@@ -59,40 +60,40 @@ pub fn snapshot_from_vfs(
 
         let init_path = path.join("init.luau");
         if vfs.metadata(&init_path).with_not_found()?.is_some() {
-            return snapshot_lua_init(context, vfs, &init_path);
+            return snapshot_lua_init(context, vfs, &init_path,max_depth);
         }
 
         let init_path = path.join("init.lua");
         if vfs.metadata(&init_path).with_not_found()?.is_some() {
-            return snapshot_lua_init(context, vfs, &init_path);
+            return snapshot_lua_init(context, vfs, &init_path,max_depth);
         }
 
         let init_path = path.join("init.server.luau");
         if vfs.metadata(&init_path).with_not_found()?.is_some() {
-            return snapshot_lua_init(context, vfs, &init_path);
+            return snapshot_lua_init(context, vfs, &init_path, max_depth);
         }
 
         let init_path = path.join("init.server.lua");
         if vfs.metadata(&init_path).with_not_found()?.is_some() {
-            return snapshot_lua_init(context, vfs, &init_path);
+            return snapshot_lua_init(context, vfs, &init_path,max_depth);
         }
 
         let init_path = path.join("init.client.luau");
         if vfs.metadata(&init_path).with_not_found()?.is_some() {
-            return snapshot_lua_init(context, vfs, &init_path);
+            return snapshot_lua_init(context, vfs, &init_path,max_depth);
         }
 
         let init_path = path.join("init.client.lua");
         if vfs.metadata(&init_path).with_not_found()?.is_some() {
-            return snapshot_lua_init(context, vfs, &init_path);
+            return snapshot_lua_init(context, vfs, &init_path,max_depth);
         }
 
         let init_path = path.join("init.csv");
         if vfs.metadata(&init_path).with_not_found()?.is_some() {
-            return snapshot_csv_init(context, vfs, &init_path);
+            return snapshot_csv_init(context, vfs, &init_path, max_depth);
         }
 
-        snapshot_dir(context, vfs, path)
+        snapshot_dir(context, vfs, path, max_depth)
     } else {
         let script_name = path
             .file_name_trim_end(".lua")
