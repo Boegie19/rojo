@@ -235,12 +235,6 @@ impl JobThreadContext {
         }
     }
 }
-
-// Find the nearest ancestor to this path that has
-// associated instances in the tree. This helps make sure
-// that we handle additions correctly, especially if we
-// receive events for descendants of a large tree being
-// created all at once.
 fn on_vfs_event(
     path: PathBuf,
     tree: &Arc<Mutex<RojoTree>>,
@@ -250,6 +244,12 @@ fn on_vfs_event(
     let mut applied_patches = Vec::new();
 
     let mut current_path = path.as_path();
+
+    // Find the nearest ancestor to this path that has
+    // associated instances in the tree. This helps make sure
+    // that we handle additions correctly, especially if we
+    // receive events for descendants of a large tree being
+    // created all at once.
     let affected_ids = loop {
         let ids = tree.get_ids_at_path(&current_path);
 
