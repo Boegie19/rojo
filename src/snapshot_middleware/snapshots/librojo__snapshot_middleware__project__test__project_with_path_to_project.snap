@@ -16,4 +16,6 @@ name: path-project
 class_name: Model
 properties: {}
 children: []
+ignore_children: false
+
 

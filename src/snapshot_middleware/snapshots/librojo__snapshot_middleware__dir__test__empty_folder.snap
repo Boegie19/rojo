@@ -23,4 +23,5 @@ name: foo
 class_name: Folder
 properties: {}
 children: []
+ignore_children: false
 

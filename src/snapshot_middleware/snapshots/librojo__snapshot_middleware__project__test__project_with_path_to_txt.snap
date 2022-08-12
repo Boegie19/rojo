@@ -19,4 +19,5 @@ properties:
   Value:
     String: "Hello, world!"
 children: []
+ignore_children: false
 

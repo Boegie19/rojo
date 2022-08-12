@@ -20,4 +20,5 @@ properties:
   Source:
     String: Hello there!
 children: []
+ignore_children: false
 

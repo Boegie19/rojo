@@ -17,4 +17,5 @@ properties:
   Value:
     String: Hi!
 children: []
+ignore_children: false
 
