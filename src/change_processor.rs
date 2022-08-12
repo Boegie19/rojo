@@ -12,10 +12,11 @@ use std::{
 
 use crate::{
     message_queue::MessageQueue,
+    resolution::UnresolvedValue,
     snapshot::{
         apply_patch_set, compute_patch_set, AppliedPatchSet, InstigatingSource, PatchSet, RojoTree,
     },
-    snapshot_middleware::{snapshot_from_vfs, snapshot_project_node},
+    snapshot_middleware::{meta_file::AdjacentMetadata, snapshot_from_vfs, snapshot_project_node},
 };
 
 /// Processes file change events, updates the DOM, and sends those updates
@@ -323,8 +324,37 @@ impl JobThreadContext {
                                     id
                                 );
                             }
+                        } else if instance.metadata().relevant_paths.len() >= 2 {
+                            let meta_path = instance.metadata().relevant_paths[1].clone();
+                            if let Some(meta_contents) =
+                                self.vfs.read(&meta_path).with_not_found().unwrap()
+                            {
+                                let mut metadata =
+                                    AdjacentMetadata::from_slice(&meta_contents, meta_path.clone())
+                                        .unwrap();
+                                metadata.properties.insert(
+                                    key.clone(),
+                                    UnresolvedValue::FullyQualified(
+                                        changed_value.as_ref().unwrap().clone(),
+                                    ),
+                                );
+                                let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                fs::write(meta_path, data).unwrap();
+                            } else {
+                                let mut metadata = AdjacentMetadata::new(meta_path.clone());
+                                metadata.properties.insert(
+                                    key.clone(),
+                                    UnresolvedValue::FullyQualified(
+                                        changed_value.as_ref().unwrap().clone(),
+                                    ),
+                                );
+                                let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                fs::write(meta_path, data).unwrap();
+                            }
                         } else {
-                            log::warn!("Cannot change properties besides BaseScript.Source.");
+                            log::warn!(
+                                "Cannot change properties of instances with no meta support"
+                            );
                         }
                     }
                 } else {
