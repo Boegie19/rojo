@@ -372,7 +372,7 @@ fn on_vfs_event(
     generation_map:&Arc<Mutex<GenerationMap>>,
 ) -> Vec<AppliedPatchSet> {
     let mut tree = tree.lock().unwrap();
-    let mut generation_map = self.generation_map.lock().unwrap();
+    let mut generation_map = generation_map.lock().unwrap();
     let mut applied_patches = Vec::new();
 
     let mut current_path = path.as_path();
@@ -399,7 +399,7 @@ fn on_vfs_event(
     };
 
     for id in affected_ids {
-        if let Some(patch) = compute_and_apply_changes(&mut tree, &vfs, id) {
+        if let Some(patch) = compute_and_apply_changes(&mut tree, &vfs, &mut generation_map, id) {
             if !patch.is_empty() {
                 applied_patches.push(patch);
             }
