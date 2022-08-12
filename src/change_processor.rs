@@ -1,20 +1,23 @@
-use std::{
-    fs,
-    sync::{Arc, Mutex},
-};
-
 use crossbeam_channel::{select, Receiver, RecvError, Sender};
+use fs_err::File;
 use jod_thread::JoinHandle;
 use memofs::{IoResultExt, Vfs, VfsEvent};
 use rbx_dom_weak::types::{Ref, Variant};
+use std::{
+    fs,
+    io::{BufWriter, Write},
+    path::PathBuf,
+    sync::{Arc, Mutex, MutexGuard},
+};
 
 use crate::{
     message_queue::MessageQueue,
+    resolution::UnresolvedValue,
     snapshot::{
         apply_patch_set, compute_patch_set, AppliedPatchSet, GenerationMap, InstigatingSource,
         PatchSet, RojoTree,
     },
-    snapshot_middleware::{snapshot_from_vfs, snapshot_project_node},
+    snapshot_middleware::{meta_file::AdjacentMetadata, snapshot_from_vfs, snapshot_project_node},
 };
 
 /// Processes file change events, updates the DOM, and sends those updates
@@ -129,49 +132,20 @@ impl JobThreadContext {
 
         // For a given VFS event, we might have many changes to different parts
         // of the tree. Calculate and apply all of these changes.
-        let applied_patches = {
-            let mut tree = self.tree.lock().unwrap();
-            let mut generation_map = self.generation_map.lock().unwrap();
-            let mut applied_patches = Vec::new();
-
-            match event {
-                VfsEvent::Create(path) | VfsEvent::Write(path) | VfsEvent::Remove(path) => {
-                    // Find the nearest ancestor to this path that has
-                    // associated instances in the tree. This helps make sure
-                    // that we handle additions correctly, especially if we
-                    // receive events for descendants of a large tree being
-                    // created all at once.
-                    let mut current_path = path.as_path();
-                    let affected_ids = loop {
-                        let ids = tree.get_ids_at_path(&current_path);
-
-                        log::trace!("Path {} affects IDs {:?}", current_path.display(), ids);
-
-                        if !ids.is_empty() {
-                            break ids.to_vec();
-                        }
-
-                        log::trace!("Trying parent path...");
-                        match current_path.parent() {
-                            Some(parent) => current_path = parent,
-                            None => break Vec::new(),
-                        }
-                    };
-
-                    for id in affected_ids {
-                        if let Some(patch) =
-                            compute_and_apply_changes(&mut tree, &self.vfs, &mut generation_map, id)
-                        {
-                            if !patch.is_empty() {
-                                applied_patches.push(patch);
-                            }
-                        }
-                    }
+        let applied_patches = match event {
+            VfsEvent::Write(path) => {
+                if path.is_dir() {
+                    return;
                 }
-                _ => log::warn!("Unhandled VFS event: {:?}", event),
+                on_vfs_event(path, &self.tree, &self.vfs, &self.generation_map)
             }
-
-            applied_patches
+            VfsEvent::Create(path) | VfsEvent::Remove(path) => {
+                on_vfs_event(path, &self.tree, &self.vfs, &self.generation_map)
+            }
+            _ => {
+                log::warn!("Unhandled VFS event: {:?}", event);
+                Vec::new()
+            }
         };
 
         // Notify anyone listening to the message queue about the changes we
@@ -181,11 +155,11 @@ impl JobThreadContext {
 
     fn handle_tree_event(&self, patch_set: PatchSet) {
         log::trace!("Applying PatchSet from client: {:#?}", patch_set);
-
+        let mut rbxm_files_to_update = Vec::new();
         let applied_patch = {
             let mut tree = self.tree.lock().unwrap();
             for &id in &patch_set.removed_instances {
-                if let Some(instance) = tree.get_instance(id) {
+                if let Some(instance) = tree.get_instance(id.clone()) {
                     if let Some(instigating_source) = &instance.metadata().instigating_source {
                         match instigating_source {
                             InstigatingSource::Path(path) => fs::remove_file(path).unwrap(),
@@ -197,6 +171,32 @@ impl JobThreadContext {
                             }
                         }
                     } else {
+                        let mut current_instance = instance;
+                        let instigating_source = loop {
+                            if let Some(instigating_source) =
+                                &current_instance.metadata().instigating_source
+                            {
+                                break instigating_source;
+                            }
+                            current_instance =
+                                tree.get_instance(current_instance.parent()).unwrap();
+                        };
+                        match instigating_source {
+                            InstigatingSource::Path(path) => {
+                                if let Some(extension) = path.extension() {
+                                    if extension == "rbxm" || extension == "rbxmx" {
+                                        if !rbxm_files_to_update
+                                            .contains(&(current_instance.id(), path.clone()))
+                                        {
+                                            rbxm_files_to_update
+                                                .push((current_instance.id(), path.clone()));
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                            InstigatingSource::ProjectNode(_, _, _, _) => {}
+                        }
                         // TODO
                         log::warn!(
                             "Cannot remove instance {:?}, it is not an instigating source.",
@@ -205,6 +205,33 @@ impl JobThreadContext {
                     }
                 } else {
                     log::warn!("Cannot remove instance {:?}, it does not exist.", id);
+                }
+            }
+            for add in &patch_set.added_instances {
+                let mut instance = tree.get_instance(add.parent_id).unwrap();
+                let instigating_source = loop {
+                    if let Some(instigating_source) = &instance.metadata().instigating_source {
+                        break instigating_source;
+                    }
+                    instance = tree.get_instance(instance.parent()).unwrap();
+                };
+                match instigating_source {
+                    InstigatingSource::Path(path) => {
+                        println!("path: {:?}", path);
+                        if let Some(extension) = path.extension() {
+                            if extension == "rbxm" || extension == "rbxmx" {
+                                if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                    rbxm_files_to_update.push((instance.id(), path.clone()))
+                                }
+                            }
+                        }
+                    }
+                    InstigatingSource::ProjectNode(_, _, _, _) => {
+                        log::warn!(
+                            "Cannot add child to {:?}, it's from a project file",
+                            add.parent_id
+                        );
+                    }
                 }
             }
 
@@ -222,6 +249,31 @@ impl JobThreadContext {
 
                     if update.changed_metadata.is_some() {
                         log::warn!("Cannot change metadata yet.");
+                    }
+                    let mut current_instance = instance;
+                    let instigating_source = loop {
+                        if let Some(instigating_source) =
+                            &current_instance.metadata().instigating_source
+                        {
+                            break instigating_source;
+                        }
+                        current_instance = tree.get_instance(current_instance.parent()).unwrap();
+                    };
+                    match instigating_source {
+                        InstigatingSource::Path(path) => {
+                            if let Some(extension) = path.extension() {
+                                if extension == "rbxm" || extension == "rbxmx" {
+                                    if !rbxm_files_to_update
+                                        .contains(&(current_instance.id(), path.clone()))
+                                    {
+                                        rbxm_files_to_update
+                                            .push((current_instance.id(), path.clone()));
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        InstigatingSource::ProjectNode(_, _, _, _) => {}
                     }
 
                     for (key, changed_value) in &update.changed_properties {
@@ -250,8 +302,37 @@ impl JobThreadContext {
                                     id
                                 );
                             }
+                        } else if instance.metadata().relevant_paths.len() >= 2 {
+                            let meta_path = instance.metadata().relevant_paths[1].clone();
+                            if let Some(meta_contents) =
+                                self.vfs.read(&meta_path).with_not_found().unwrap()
+                            {
+                                let mut metadata =
+                                    AdjacentMetadata::from_slice(&meta_contents, meta_path.clone())
+                                        .unwrap();
+                                metadata.properties.insert(
+                                    key.clone(),
+                                    UnresolvedValue::FullyQualified(
+                                        changed_value.as_ref().unwrap().clone(),
+                                    ),
+                                );
+                                let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                fs::write(meta_path, data).unwrap();
+                            } else {
+                                let mut metadata = AdjacentMetadata::new(meta_path.clone());
+                                metadata.properties.insert(
+                                    key.clone(),
+                                    UnresolvedValue::FullyQualified(
+                                        changed_value.as_ref().unwrap().clone(),
+                                    ),
+                                );
+                                let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                fs::write(meta_path, data).unwrap();
+                            }
                         } else {
-                            log::warn!("Cannot change properties besides BaseScript.Source.");
+                            log::warn!(
+                                "Cannot change properties of instances with no meta support"
+                            );
                         }
                     }
                 } else {
@@ -259,7 +340,24 @@ impl JobThreadContext {
                 }
             }
 
-            apply_patch_set(&mut tree, patch_set)
+            let apply_patch_set = apply_patch_set(&mut tree, patch_set);
+
+            for (id, path) in rbxm_files_to_update {
+                match write_model(&tree, &path, id) {
+                    Ok(_) => {
+                        println!("Done")
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Cannot update rbxm or rbxml at path {:?}, because of error: {:?}.",
+                            path,
+                            error
+                        );
+                    }
+                };
+            }
+
+            apply_patch_set
         };
 
         if !applied_patch.is_empty() {
@@ -267,7 +365,48 @@ impl JobThreadContext {
         }
     }
 }
+fn on_vfs_event(
+    path: PathBuf,
+    tree: &Arc<Mutex<RojoTree>>,
+    vfs: &Arc<Vfs>,
+    generation_map:&Arc<Mutex<GenerationMap>>,
+) -> Vec<AppliedPatchSet> {
+    let mut tree = tree.lock().unwrap();
+    let mut generation_map = self.generation_map.lock().unwrap();
+    let mut applied_patches = Vec::new();
 
+    let mut current_path = path.as_path();
+
+    // Find the nearest ancestor to this path that has
+    // associated instances in the tree. This helps make sure
+    // that we handle additions correctly, especially if we
+    // receive events for descendants of a large tree being
+    // created all at once.
+    let affected_ids = loop {
+        let ids = tree.get_ids_at_path(&current_path);
+
+        log::trace!("Path {} affects IDs {:?}", current_path.display(), ids);
+
+        if !ids.is_empty() {
+            break ids.to_vec();
+        }
+
+        log::trace!("Trying parent path...");
+        match current_path.parent() {
+            Some(parent) => current_path = parent,
+            None => break Vec::new(),
+        }
+    };
+
+    for id in affected_ids {
+        if let Some(patch) = compute_and_apply_changes(&mut tree, &vfs, id) {
+            if !patch.is_empty() {
+                applied_patches.push(patch);
+            }
+        }
+    }
+    applied_patches
+}
 fn compute_and_apply_changes(
     tree: &mut RojoTree,
     vfs: &Vfs,
@@ -361,4 +500,24 @@ fn compute_and_apply_changes(
     };
 
     Some(applied_patch_set)
+}
+
+fn write_model(tree: &MutexGuard<RojoTree>, path: &PathBuf, root_id: Ref) -> anyhow::Result<()> {
+    log::trace!("Opening output file for write");
+    println!("{:?}", root_id);
+    let mut file = BufWriter::new(File::create(path)?);
+    let extension = path.extension().unwrap();
+    if extension == "rbxm" {
+        rbx_binary::to_writer(&mut file, tree.inner(), &[root_id])?;
+    } else if extension == "rbxmx" {
+        rbx_xml::to_writer(&mut file, tree.inner(), &[root_id], xml_encode_config())?;
+    }
+
+    file.flush()?;
+
+    Ok(())
+}
+
+fn xml_encode_config() -> rbx_xml::EncodeOptions {
+    rbx_xml::EncodeOptions::new().property_behavior(rbx_xml::EncodePropertyBehavior::WriteUnknown)
 }

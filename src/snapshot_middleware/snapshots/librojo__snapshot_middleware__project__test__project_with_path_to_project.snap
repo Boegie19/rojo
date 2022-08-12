@@ -11,9 +11,11 @@ metadata:
     - /foo/other.project.json
     - /foo/default.project.json
   context: {}
+  debug_id: ~
 name: path-project
 class_name: Model
 properties: {}
 children: []
 ignore_children: false
+
 
