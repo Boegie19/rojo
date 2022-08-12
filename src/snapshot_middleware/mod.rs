@@ -8,9 +8,9 @@
 mod csv;
 mod dir;
 mod json;
-mod json_model;
+pub mod json_model;
 mod lua;
-mod meta_file;
+pub mod meta_file;
 mod project;
 mod rbxm;
 mod rbxmx;
