@@ -17,7 +17,7 @@ use crate::{
         apply_patch_set, compute_patch_set, AppliedPatchSet, GenerationMap, InstigatingSource,
         PatchSet, RojoTree,
     },
-    snapshot_middleware::{meta_file::AdjacentMetadata, snapshot_from_vfs, snapshot_project_node},
+    snapshot_middleware::{meta_file::AdjacentMetadata, snapshot_from_vfs, snapshot_project_node}, chaange_bypass::ChangeBypass,
 };
 
 /// Processes file change events, updates the DOM, and sends those updates
@@ -64,6 +64,7 @@ impl ChangeProcessor {
             generation_map,
             vfs,
             message_queue,
+            change_bypass: Arc::new(Mutex::new(ChangeBypass::new())),
         };
 
         let job_thread = jod_thread::Builder::new()
@@ -119,6 +120,8 @@ struct JobThreadContext {
     /// Whenever changes are applied to the DOM, we should push those changes
     /// into this message queue to inform any connected clients.
     message_queue: Arc<MessageQueue<AppliedPatchSet>>,
+
+    change_bypass: Arc<Mutex<ChangeBypass>>,
 }
 
 impl JobThreadContext {
@@ -137,10 +140,10 @@ impl JobThreadContext {
                 if path.is_dir() {
                     return;
                 }
-                on_vfs_event(path, &self.tree, &self.vfs, &self.generation_map)
+                on_vfs_event(path, &self.tree, &self.vfs, &self.generation_map, &self.change_bypass)
             }
             VfsEvent::Create(path) | VfsEvent::Remove(path) => {
-                on_vfs_event(path, &self.tree, &self.vfs, &self.generation_map)
+                on_vfs_event(path, &self.tree, &self.vfs, &self.generation_map, &self.change_bypass)
             }
             _ => {
                 log::warn!("Unhandled VFS event: {:?}", event);
@@ -154,6 +157,7 @@ impl JobThreadContext {
     }
 
     fn handle_tree_event(&self, patch_set: PatchSet) {
+        let mut change_bypass  = self.change_bypass.lock().unwrap();
         log::trace!("Applying PatchSet from client: {:#?}", patch_set);
         let mut rbxm_files_to_update = Vec::new();
         let applied_patch = {
@@ -162,7 +166,10 @@ impl JobThreadContext {
                 if let Some(instance) = tree.get_instance(id.clone()) {
                     if let Some(instigating_source) = &instance.metadata().instigating_source {
                         match instigating_source {
-                            InstigatingSource::Path(path) => fs::remove_file(path).unwrap(),
+                            InstigatingSource::Path(path) => {
+                                change_bypass.insert(path.clone());
+                                fs::remove_file(path).unwrap();
+                            }
                             InstigatingSource::ProjectNode(_, _, _, _) => {
                                 log::warn!(
                                     "Cannot remove instance {:?}, it's from a project file",
@@ -188,6 +195,7 @@ impl JobThreadContext {
                                         if !rbxm_files_to_update
                                             .contains(&(current_instance.id(), path.clone()))
                                         {
+                                            change_bypass.insert(path.to_path_buf());
                                             rbxm_files_to_update
                                                 .push((current_instance.id(), path.clone()));
                                             continue;
@@ -221,6 +229,7 @@ impl JobThreadContext {
                         if let Some(extension) = path.extension() {
                             if extension == "rbxm" || extension == "rbxmx" {
                                 if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                    change_bypass.insert(path.to_path_buf());
                                     rbxm_files_to_update.push((instance.id(), path.clone()))
                                 }
                             }
@@ -266,6 +275,7 @@ impl JobThreadContext {
                                     if !rbxm_files_to_update
                                         .contains(&(current_instance.id(), path.clone()))
                                     {
+                                        change_bypass.insert(path.to_path_buf());
                                         rbxm_files_to_update
                                             .push((current_instance.id(), path.clone()));
                                         continue;
@@ -284,12 +294,15 @@ impl JobThreadContext {
                                 match instigating_source {
                                     InstigatingSource::Path(path) => {
                                         if let Some(Variant::String(value)) = changed_value {
+                                            change_bypass.insert(path.to_path_buf());
+
                                             fs::write(path, value).unwrap();
                                         } else {
                                             log::warn!("Cannot change Source to non-string value.");
                                         }
                                     }
-                                    InstigatingSource::ProjectNode(_, _, _, _) => {
+                                    InstigatingSource::ProjectNode(path, _, _, _) => {
+                                        println!("{:?}", path);
                                         log::warn!(
                                             "Cannot remove instance {:?}, it's from a project file",
                                             id
@@ -302,6 +315,7 @@ impl JobThreadContext {
                                     id
                                 );
                             }
+                        //TODO Rewrite to be more flexible
                         } else if instance.metadata().relevant_paths.len() >= 2 {
                             let meta_path = instance.metadata().relevant_paths[1].clone();
                             if let Some(meta_contents) =
@@ -317,6 +331,7 @@ impl JobThreadContext {
                                     ),
                                 );
                                 let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                change_bypass.insert(meta_path.clone());
                                 fs::write(meta_path, data).unwrap();
                             } else {
                                 let mut metadata = AdjacentMetadata::new(meta_path.clone());
@@ -327,6 +342,7 @@ impl JobThreadContext {
                                     ),
                                 );
                                 let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                change_bypass.insert(meta_path.clone());
                                 fs::write(meta_path, data).unwrap();
                             }
                         } else {
@@ -356,7 +372,7 @@ impl JobThreadContext {
                     }
                 };
             }
-
+            println!("{:?}", apply_patch_set);
             apply_patch_set
         };
 
@@ -370,7 +386,13 @@ fn on_vfs_event(
     tree: &Arc<Mutex<RojoTree>>,
     vfs: &Arc<Vfs>,
     generation_map:&Arc<Mutex<GenerationMap>>,
+    change_bypass:&Arc<Mutex<ChangeBypass>>,
 ) -> Vec<AppliedPatchSet> {
+    let mut change_bypass = change_bypass.lock().unwrap();
+    if change_bypass.needs_bypass(path.clone()){
+        
+        return Vec::new()
+    }
     let mut tree = tree.lock().unwrap();
     let mut generation_map = generation_map.lock().unwrap();
     let mut applied_patches = Vec::new();

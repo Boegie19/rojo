@@ -28,6 +28,7 @@ pub const PROTOCOL_VERSION: u64 = 4;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeMessage<'a> {
+    pub guid: Option<String>,
     pub removed: Vec<Ref>,
     pub added: HashMap<Ref, Instance<'a>>,
     pub updated: Vec<InstanceUpdate>,
@@ -36,7 +37,6 @@ pub struct SubscribeMessage<'a> {
 impl<'a> SubscribeMessage<'a> {
     pub(crate) fn from_patch_update(tree: &'a RojoTree, patch: AppliedPatchSet) -> Self {
         let removed = patch.removed;
-
         let mut added = HashMap::new();
         for id in patch.added {
             let instance = tree.get_instance(id).unwrap();
@@ -73,6 +73,7 @@ impl<'a> SubscribeMessage<'a> {
             .collect();
 
         Self {
+            guid: patch.guid,
             removed,
             added,
             updated,
@@ -182,6 +183,7 @@ pub struct ReadResponse<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct WriteRequest {
     pub session_id: SessionId,
+    pub guid: String,
     pub removed: Vec<Ref>,
 
     #[serde(default)]

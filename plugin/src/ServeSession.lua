@@ -50,6 +50,7 @@ local validateServeOptions = t.strictInterface({
 	apiContext = t.table,
 	openScriptsExternally = t.boolean,
 	twoWaySync = t.boolean,
+	guid = t.string
 })
 
 function ServeSession.new(options)
@@ -97,6 +98,7 @@ function ServeSession.new(options)
 		__statusChangedCallback = nil,
 		__patchAppliedCallback = nil,
 		__connections = connections,
+		__guid = options.guid
 	}
 
 	setmetatable(self, ServeSession)
@@ -250,6 +252,9 @@ function ServeSession:__mainSyncLoop()
 	return self.__apiContext:retrieveMessages()
 		:andThen(function(messages)
 			for _, message in ipairs(messages) do
+				if message.guid == self.__guid then
+					continue
+				end
 				local unappliedPatch = self.__reconciler:applyPatch(message)
 
 				if not PatchSet.isEmpty(unappliedPatch) then
