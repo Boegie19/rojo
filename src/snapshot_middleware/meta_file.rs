@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, path::PathBuf};
 
 use anyhow::{format_err, Context};
-use rbx_dom_weak::types::Attributes;
+use rbx_dom_weak::types::{Attributes, Variant};
 use serde::{Deserialize, Serialize};
 
 use crate::{resolution::UnresolvedValue, snapshot::InstanceSnapshot};
@@ -19,6 +19,9 @@ pub struct AdjacentMetadata {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub properties: HashMap<String, UnresolvedValue>,
 
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub attributes: HashMap<String, UnresolvedValue>,
+
     #[serde(skip)]
     pub path: PathBuf,
 }
@@ -27,6 +30,7 @@ impl AdjacentMetadata {
         AdjacentMetadata {
             ignore_unknown_instances: None,
             properties: HashMap::new(),
+            attributes: HashMap::new(),
             path: path,
         }
     }
@@ -40,6 +44,31 @@ impl AdjacentMetadata {
 
         meta.path = path;
         Ok(meta)
+    }
+    pub fn insert(&mut self, key: String, value: Variant) {
+        if key == "Attributes" {
+            match value {
+                Variant::Attributes(attributes) => {
+                    for (name, value) in attributes {
+                        let unresolved_value = UnresolvedValue::FullyQualified(value);
+                        match self.attributes.get(&name) {
+                            Some(value2) => {
+                                if  unresolved_value.to_owned().resolve_unambiguous().unwrap() != value2.to_owned().resolve_unambiguous().unwrap(){
+                                    self.attributes.insert(name, unresolved_value);
+                                }
+                            }
+                            None => {
+                                self.attributes.insert(name, unresolved_value);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            self.properties
+                .insert(key, UnresolvedValue::FullyQualified(value));
+        }
     }
 
     pub fn apply_ignore_unknown_instances(&mut self, snapshot: &mut InstanceSnapshot) {
@@ -57,6 +86,19 @@ impl AdjacentMetadata {
                 .with_context(|| format!("error applying meta file {}", path.display()))?;
 
             snapshot.properties.insert(key, value);
+        }
+
+        if !self.attributes.is_empty() {
+            let mut attributes = Attributes::new();
+
+            for (key, unresolved) in self.attributes.drain() {
+                let value = unresolved.resolve_unambiguous()?;
+                attributes.insert(key, value);
+            }
+
+            snapshot
+                .properties
+                .insert("Attributes".into(), attributes.into());
         }
 
         Ok(())
@@ -107,7 +149,43 @@ impl DirectoryMetadata {
         meta.path = path;
         Ok(meta)
     }
+    pub fn new(path: PathBuf) -> DirectoryMetadata {
+        DirectoryMetadata {
+            ignore_unknown_instances: None,
+            properties: HashMap::new(),
+            attributes: HashMap::new(),
+            class_name: None,
+            path: path,
+        }
+    }
 
+    pub fn insert(&mut self, key: String, value: Variant) {
+        if key == "Attributes" {
+            match value {
+                Variant::Attributes(attributes) => {
+                    for (name, value) in attributes {
+                        let unresolved_value = UnresolvedValue::FullyQualified(value);
+                        match self.attributes.get(&name) {
+                            Some(value2) => {
+                                if  unresolved_value.to_owned().resolve_unambiguous().unwrap() != value2.to_owned().resolve_unambiguous().unwrap(){
+                                    self.attributes.insert(name, unresolved_value);
+                                }
+                            }
+                            None => {
+                                self.attributes.insert(name, unresolved_value);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            self.properties
+                .insert(key, UnresolvedValue::FullyQualified(value));
+        }
+    }
+
+    
     pub fn apply_all(&mut self, snapshot: &mut InstanceSnapshot) -> anyhow::Result<()> {
         self.apply_ignore_unknown_instances(snapshot);
         self.apply_class_name(snapshot)?;
