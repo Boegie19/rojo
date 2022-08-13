@@ -85,7 +85,7 @@ end
 local ApiContext = {}
 ApiContext.__index = ApiContext
 
-function ApiContext.new(baseUrl)
+function ApiContext.new(baseUrl,guid)
 	assert(type(baseUrl) == "string", "baseUrl must be a string")
 
 	local self = {
@@ -93,6 +93,7 @@ function ApiContext.new(baseUrl)
 		__sessionId = nil,
 		__messageCursor = -1,
 		__connected = true,
+		__guid = guid
 	}
 
 	return setmetatable(self, ApiContext)
@@ -183,6 +184,7 @@ function ApiContext:write(patch)
 
 	local body = {
 		sessionId = self.__sessionId,
+		guid = self.__guid,
 		removed = patch.removed,
 		updated = updated,
 		added = added,

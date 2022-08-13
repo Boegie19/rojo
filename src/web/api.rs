@@ -101,7 +101,6 @@ impl ApiService {
                     .into_iter()
                     .map(|patch| SubscribeMessage::from_patch_update(&tree, patch))
                     .collect();
-
                 json_ok(SubscribeResponse {
                     session_id,
                     message_cursor,
@@ -161,6 +160,7 @@ impl ApiService {
 
         tree_mutation_sender
             .send(PatchSet {
+                guid: Some(request.guid),
                 removed_instances: request.removed,
                 added_instances,
                 updated_instances,

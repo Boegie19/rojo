@@ -17,7 +17,7 @@ use super::{
 /// tree in sync with Rojo's.
 #[profiling::function]
 pub fn apply_patch_set(tree: &mut RojoTree, patch_set: PatchSet) -> AppliedPatchSet {
-    let mut context = PatchApplyContext::default();
+    let mut context = PatchApplyContext::new(patch_set.guid);
 
     {
         profiling::scope!("removals");
@@ -86,6 +86,17 @@ struct PatchApplyContext {
 /// The remaining Ref properties need to be handled during patch application,
 /// where we build up a map of snapshot IDs to instance IDs as they're created,
 /// then apply properties all at once at the end.
+
+impl PatchApplyContext {
+    fn new(guid: Option<String>) -> Self {
+        Self {
+            snapshot_id_to_instance_id: HashMap::new(),
+            has_refs_to_rewrite: HashSet::new(),
+            applied_patch_set: AppliedPatchSet::new(guid),
+        }
+    }
+}
+
 #[profiling::function]
 fn finalize_patch_application(context: PatchApplyContext, tree: &mut RojoTree) -> AppliedPatchSet {
     for id in context.has_refs_to_rewrite {

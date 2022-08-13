@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
+local HttpSevice = game:GetService("HttpService")
 
 local Rojo = script:FindFirstAncestor("Rojo")
 local Plugin = Rojo.Plugin
@@ -160,14 +161,15 @@ function App:startSession()
 		openScriptsExternally = Settings:get("openScriptsExternally"),
 		twoWaySync = Settings:get("twoWaySync"),
 	}
-
+	local guid = HttpSevice:GenerateGUID(false)
 	local baseUrl = ("http://%s:%s"):format(host, port)
-	local apiContext = ApiContext.new(baseUrl)
+	local apiContext = ApiContext.new(baseUrl,guid)
 
 	local serveSession = ServeSession.new({
 		apiContext = apiContext,
 		openScriptsExternally = sessionOptions.openScriptsExternally,
 		twoWaySync = sessionOptions.twoWaySync,
+		guid = guid
 	})
 
 	serveSession:onPatchApplied(function(patch, unapplied)

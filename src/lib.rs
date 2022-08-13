@@ -8,6 +8,7 @@ pub mod cli;
 pub mod tree_view;
 
 mod auth_cookie;
+mod change_bypass;
 mod change_processor;
 mod glob;
 mod lua_ast;

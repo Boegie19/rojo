@@ -16,7 +16,7 @@ local  function createInstanceSnapshot(instanceMap,instance)
 	end
 
 	local success, properties = RbxDom.findAllNoneDefaultPropertiesEncoded(instance)
-	if success
+	if success then
 		properties.Name = nil
 		properties.ClassName = nil
 
