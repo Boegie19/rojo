@@ -11,13 +11,16 @@ use std::{
 };
 
 use crate::{
+    change_bypass::ChangeBypass,
     message_queue::MessageQueue,
-    resolution::UnresolvedValue,
     snapshot::{
         apply_patch_set, compute_patch_set, AppliedPatchSet, GenerationMap, InstigatingSource,
         PatchSet, RojoTree,
     },
-    snapshot_middleware::{meta_file::AdjacentMetadata, snapshot_from_vfs, snapshot_project_node}, chaange_bypass::ChangeBypass,
+    snapshot_middleware::{
+        meta_file::{AdjacentMetadata, DirectoryMetadata},
+        snapshot_from_vfs, snapshot_project_node,
+    },
 };
 
 /// Processes file change events, updates the DOM, and sends those updates
@@ -140,11 +143,21 @@ impl JobThreadContext {
                 if path.is_dir() {
                     return;
                 }
-                on_vfs_event(path, &self.tree, &self.vfs, &self.generation_map, &self.change_bypass)
+                on_vfs_event(
+                    path,
+                    &self.tree,
+                    &self.vfs,
+                    &self.generation_map,
+                    &self.change_bypass,
+                )
             }
-            VfsEvent::Create(path) | VfsEvent::Remove(path) => {
-                on_vfs_event(path, &self.tree, &self.vfs, &self.generation_map, &self.change_bypass)
-            }
+            VfsEvent::Create(path) | VfsEvent::Remove(path) => on_vfs_event(
+                path,
+                &self.tree,
+                &self.vfs,
+                &self.generation_map,
+                &self.change_bypass,
+            ),
             _ => {
                 log::warn!("Unhandled VFS event: {:?}", event);
                 Vec::new()
@@ -157,7 +170,7 @@ impl JobThreadContext {
     }
 
     fn handle_tree_event(&self, patch_set: PatchSet) {
-        let mut change_bypass  = self.change_bypass.lock().unwrap();
+        let mut change_bypass = self.change_bypass.lock().unwrap();
         log::trace!("Applying PatchSet from client: {:#?}", patch_set);
         let mut rbxm_files_to_update = Vec::new();
         let applied_patch = {
@@ -289,7 +302,7 @@ impl JobThreadContext {
                     for (key, changed_value) in &update.changed_properties {
                         if key == "Source" {
                             if let Some(instigating_source) =
-                                &instance.metadata().instigating_source
+                                &current_instance.metadata().instigating_source
                             {
                                 match instigating_source {
                                     InstigatingSource::Path(path) => {
@@ -316,35 +329,39 @@ impl JobThreadContext {
                                 );
                             }
                         //TODO Rewrite to be more flexible
-                        } else if instance.metadata().relevant_paths.len() >= 2 {
-                            let meta_path = instance.metadata().relevant_paths[1].clone();
-                            if let Some(meta_contents) =
-                                self.vfs.read(&meta_path).with_not_found().unwrap()
-                            {
+                        } else if current_instance.metadata().relevant_paths.len() >= 2 {
+                            let meta_path = current_instance.metadata().relevant_paths[1].clone();
+                            if meta_path.ends_with("init.meta.json") {
                                 let mut metadata =
-                                    AdjacentMetadata::from_slice(&meta_contents, meta_path.clone())
-                                        .unwrap();
-                                metadata.properties.insert(
-                                    key.clone(),
-                                    UnresolvedValue::FullyQualified(
-                                        changed_value.as_ref().unwrap().clone(),
-                                    ),
-                                );
+                                    match self.vfs.read(&meta_path).with_not_found().unwrap() {
+                                        Some(meta_contents) => DirectoryMetadata::from_slice(
+                                            &meta_contents,
+                                            meta_path.clone(),
+                                        )
+                                        .unwrap(),
+                                        None => DirectoryMetadata::new(meta_path.clone()),
+                                    };
+                                metadata
+                                    .insert(key.clone(), changed_value.as_ref().unwrap().clone());
                                 let data = serde_json::to_string_pretty(&metadata).unwrap();
                                 change_bypass.insert(meta_path.clone());
                                 fs::write(meta_path, data).unwrap();
                             } else {
-                                let mut metadata = AdjacentMetadata::new(meta_path.clone());
-                                metadata.properties.insert(
-                                    key.clone(),
-                                    UnresolvedValue::FullyQualified(
-                                        changed_value.as_ref().unwrap().clone(),
-                                    ),
-                                );
-                                let data = serde_json::to_string_pretty(&metadata).unwrap();
-                                change_bypass.insert(meta_path.clone());
-                                fs::write(meta_path, data).unwrap();
-                            }
+                                let mut metadata =
+                                match self.vfs.read(&meta_path).with_not_found().unwrap() {
+                                    Some(meta_contents) => AdjacentMetadata::from_slice(
+                                        &meta_contents,
+                                        meta_path.clone(),
+                                    )
+                                    .unwrap(),
+                                    None => AdjacentMetadata::new(meta_path.clone()),
+                                };
+                            metadata
+                                .insert(key.clone(), changed_value.as_ref().unwrap().clone());
+                            let data = serde_json::to_string_pretty(&metadata).unwrap();
+                            change_bypass.insert(meta_path.clone());
+                            fs::write(meta_path, data).unwrap();
+                            };
                         } else {
                             log::warn!(
                                 "Cannot change properties of instances with no meta support"
@@ -385,13 +402,12 @@ fn on_vfs_event(
     path: PathBuf,
     tree: &Arc<Mutex<RojoTree>>,
     vfs: &Arc<Vfs>,
-    generation_map:&Arc<Mutex<GenerationMap>>,
-    change_bypass:&Arc<Mutex<ChangeBypass>>,
+    generation_map: &Arc<Mutex<GenerationMap>>,
+    change_bypass: &Arc<Mutex<ChangeBypass>>,
 ) -> Vec<AppliedPatchSet> {
     let mut change_bypass = change_bypass.lock().unwrap();
-    if change_bypass.needs_bypass(path.clone()){
-        
-        return Vec::new()
+    if change_bypass.needs_bypass(path.clone()) {
+        return Vec::new();
     }
     let mut tree = tree.lock().unwrap();
     let mut generation_map = generation_map.lock().unwrap();

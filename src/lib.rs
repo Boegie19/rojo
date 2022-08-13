@@ -8,6 +8,7 @@ pub mod cli;
 pub mod tree_view;
 
 mod auth_cookie;
+mod change_bypass;
 mod change_processor;
 mod glob;
 mod lua_ast;
@@ -21,7 +22,6 @@ mod session_id;
 mod snapshot;
 mod snapshot_middleware;
 mod web;
-mod chaange_bypass;
 
 pub use project::*;
 pub use session_id::SessionId;
