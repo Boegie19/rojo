@@ -174,15 +174,18 @@ impl JobThreadContext {
 
     fn handle_tree_event(&self, patch_set: PatchSet) {
         let mut change_bypass = self.change_bypass.lock().unwrap();
+        let mut tree = self.tree.lock().unwrap();
+        let mut generation_map = self.generation_map.lock().unwrap();
+        let mut used_paths = Vec::new();
         log::trace!("Applying PatchSet from client: {:#?}", patch_set);
         let mut rbxm_files_to_update = Vec::new();
         let applied_patch = {
-            let mut tree = self.tree.lock().unwrap();
             for &id in &patch_set.removed_instances {
                 if let Some(instance) = tree.get_instance(id.clone()) {
                     if let Some(instigating_source) = &instance.metadata().instigating_source {
                         match instigating_source {
                             InstigatingSource::Path(path) => {
+                                used_paths.push(path.clone());
                                 change_bypass.insert(path.clone());
                                 fs::remove_file(path).unwrap();
                             }
@@ -211,6 +214,7 @@ impl JobThreadContext {
                                         if !rbxm_files_to_update
                                             .contains(&(current_instance.id(), path.clone()))
                                         {
+                                            used_paths.push(path.clone());
                                             change_bypass.insert(path.to_path_buf());
                                             rbxm_files_to_update
                                                 .push((current_instance.id(), path.clone()));
@@ -241,10 +245,10 @@ impl JobThreadContext {
                 };
                 match instigating_source {
                     InstigatingSource::Path(path) => {
-                        println!("path: {:?}", path);
                         if let Some(extension) = path.extension() {
                             if extension == "rbxm" || extension == "rbxmx" {
                                 if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                    used_paths.push(path.clone());
                                     change_bypass.insert(path.to_path_buf());
                                     rbxm_files_to_update.push((instance.id(), path.clone()))
                                 }
@@ -318,6 +322,7 @@ impl JobThreadContext {
                                                                 );
                                                                 let tree: &_ = tree;
                                                                 project.tree = tree.clone();
+                                                                used_paths.push(path.clone());
                                                                 change_bypass.insert(path.to_path_buf());
                                                                 fs::write(
                                                                     path.to_owned(),
@@ -352,6 +357,7 @@ impl JobThreadContext {
                                                 );
                                                 let tree: &_ = tree;
                                                 project.tree = tree.clone();
+                                                used_paths.push(path.clone());
                                                 change_bypass.insert(path.to_path_buf());
                                                 fs::write(
                                                     path.to_owned(),
@@ -371,12 +377,14 @@ impl JobThreadContext {
                                 || path.file_name_ends_with(".rbxmx")
                             {
                                 if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                    used_paths.push(path.clone());
                                     change_bypass.insert(path.to_path_buf());
                                     rbxm_files_to_update.push((instance.id(), path.clone()));
                                 }
                                 continue 'changed_properties;
                             } else if path.file_name_ends_with(".lua") && key == "Source" {
                                 if let Some(Variant::String(value)) = changed_value {
+                                    used_paths.push(path.clone());
                                     change_bypass.insert(path.to_path_buf());
 
                                     fs::write(path, value).unwrap();
@@ -399,6 +407,7 @@ impl JobThreadContext {
                                         changed_value.as_ref().unwrap().clone(),
                                     );
                                     let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                    used_paths.push(path.clone());
                                     change_bypass.insert(path.clone());
                                     fs::write(path, data).unwrap();
                                 } else {
@@ -416,6 +425,7 @@ impl JobThreadContext {
                                         changed_value.as_ref().unwrap().clone(),
                                     );
                                     let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                    used_paths.push(path.clone());
                                     change_bypass.insert(path.clone());
                                     fs::write(path, data).unwrap();
                                 };
@@ -431,9 +441,7 @@ impl JobThreadContext {
 
             for (id, path) in rbxm_files_to_update {
                 match write_model(&tree, &path, id) {
-                    Ok(_) => {
-                        println!("Done")
-                    }
+                    Ok(_) => { }
                     Err(error) => {
                         log::warn!(
                             "Cannot update rbxm or rbxml at path {:?}, because of error: {:?}.",
@@ -443,12 +451,26 @@ impl JobThreadContext {
                     }
                 };
             }
-            println!("{:?}", apply_patch_set);
             apply_patch_set
         };
 
         if !applied_patch.is_empty() {
             self.message_queue.push_messages(&[applied_patch]);
+        }
+
+        let  mut applied_patches =  Vec::new();
+        for path in used_paths {
+            let affected_ids =  tree.get_ids_at_path(&path.as_path()).to_vec();
+            for id in affected_ids {
+                if let Some(patch) = compute_and_apply_changes(&mut tree, &self.vfs, &mut generation_map, id) {
+                    if !patch.is_empty() {
+                        applied_patches.push(patch);
+                    }
+                }
+            }
+        }
+        if !applied_patches.is_empty() {
+            self.message_queue.push_messages(&applied_patches);
         }
     }
 }
@@ -603,7 +625,6 @@ fn compute_and_apply_changes(
 
 fn write_model(tree: &MutexGuard<RojoTree>, path: &PathBuf, root_id: Ref) -> anyhow::Result<()> {
     log::trace!("Opening output file for write");
-    println!("{:?}", root_id);
     let mut file = BufWriter::new(File::create(path)?);
     let extension = path.extension().unwrap();
     if extension == "rbxm" {
