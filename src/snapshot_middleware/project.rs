@@ -32,7 +32,6 @@ pub fn snapshot_project(
     });
 
     context.add_path_ignore_rules(rules);
-
     match snapshot_project_node(
         &context,
         path,
@@ -41,6 +40,7 @@ pub fn snapshot_project(
         vfs,
         None,
         generation_map,
+        &project,
     )? {
         Some(found_snapshot) => {
             let mut snapshot = found_snapshot;
@@ -76,6 +76,7 @@ pub fn snapshot_project_node(
     vfs: &Vfs,
     parent_class: Option<&str>,
     generation_map: &mut GenerationMap,
+    project: &Project,
 ) -> anyhow::Result<Option<InstanceSnapshot>> {
     let project_folder = project_path.parent().unwrap();
 
@@ -211,6 +212,7 @@ pub fn snapshot_project_node(
             vfs,
             Some(&class_name),
             generation_map,
+            project,
         )? {
             children.push(child);
         }
@@ -274,12 +276,12 @@ pub fn snapshot_project_node(
         // set implicitly.
         metadata.ignore_unknown_instances = true;
     }
-
     metadata.instigating_source = Some(InstigatingSource::ProjectNode(
         project_path.to_path_buf(),
         instance_name.to_string(),
         node.clone(),
         parent_class.map(|name| name.to_owned()),
+        project.to_owned(),
     ));
 
     Ok(Some(InstanceSnapshot {

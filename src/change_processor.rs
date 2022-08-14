@@ -13,6 +13,7 @@ use std::{
 use crate::{
     change_bypass::ChangeBypass,
     message_queue::MessageQueue,
+    resolution::UnresolvedValue,
     snapshot::{
         apply_patch_set, compute_patch_set, AppliedPatchSet, GenerationMap, InstigatingSource,
         PatchSet, RojoTree,
@@ -20,7 +21,9 @@ use crate::{
     snapshot_middleware::{
         meta_file::{AdjacentMetadata, DirectoryMetadata},
         snapshot_from_vfs, snapshot_project_node,
+        util::PathExt,
     },
+    ProjectNode,
 };
 
 /// Processes file change events, updates the DOM, and sends those updates
@@ -183,7 +186,7 @@ impl JobThreadContext {
                                 change_bypass.insert(path.clone());
                                 fs::remove_file(path).unwrap();
                             }
-                            InstigatingSource::ProjectNode(_, _, _, _) => {
+                            InstigatingSource::ProjectNode(_, _, _, _, _) => {
                                 log::warn!(
                                     "Cannot remove instance {:?}, it's from a project file",
                                     id
@@ -216,7 +219,7 @@ impl JobThreadContext {
                                     }
                                 }
                             }
-                            InstigatingSource::ProjectNode(_, _, _, _) => {}
+                            InstigatingSource::ProjectNode(_, _, _, _, _) => {}
                         }
                         // TODO
                         log::warn!(
@@ -248,7 +251,7 @@ impl JobThreadContext {
                             }
                         }
                     }
-                    InstigatingSource::ProjectNode(_, _, _, _) => {
+                    InstigatingSource::ProjectNode(_, _, _, _, _) => {
                         log::warn!(
                             "Cannot add child to {:?}, it's from a project file",
                             add.parent_id
@@ -260,112 +263,163 @@ impl JobThreadContext {
             for update in &patch_set.updated_instances {
                 let id = update.id;
 
-                if let Some(instance) = tree.get_instance(id) {
-                    if update.changed_name.is_some() {
-                        log::warn!("Cannot rename instances yet.");
-                    }
+                if update.changed_name.is_some() {
+                    log::warn!("Cannot rename instances yet.");
+                }
 
-                    if update.changed_class_name.is_some() {
-                        log::warn!("Cannot change ClassName yet.");
-                    }
+                if update.changed_class_name.is_some() {
+                    log::warn!("Cannot change ClassName yet.");
+                }
 
-                    if update.changed_metadata.is_some() {
-                        log::warn!("Cannot change metadata yet.");
-                    }
-                    let mut current_instance = instance;
+                if update.changed_metadata.is_some() {
+                    log::warn!("Cannot change metadata yet.");
+                }
+
+                if let Some(mut instance) = tree.get_instance(id) {
                     let instigating_source = loop {
-                        if let Some(instigating_source) =
-                            &current_instance.metadata().instigating_source
-                        {
+                        if let Some(instigating_source) = &instance.metadata().instigating_source {
                             break instigating_source;
                         }
-                        current_instance = tree.get_instance(current_instance.parent()).unwrap();
+                        instance = tree.get_instance(instance.parent()).unwrap();
                     };
-                    match instigating_source {
-                        InstigatingSource::Path(path) => {
-                            if let Some(extension) = path.extension() {
-                                if extension == "rbxm" || extension == "rbxmx" {
-                                    if !rbxm_files_to_update
-                                        .contains(&(current_instance.id(), path.clone()))
-                                    {
-                                        change_bypass.insert(path.to_path_buf());
-                                        rbxm_files_to_update
-                                            .push((current_instance.id(), path.clone()));
-                                        continue;
+                    'changed_properties: for (key, changed_value) in &update.changed_properties {
+                        if let Some(changed_value) = changed_value {
+                            match instigating_source.to_owned() {
+                                InstigatingSource::Path(_) => {}
+                                InstigatingSource::ProjectNode(
+                                    path,
+                                    _,
+                                    project_node,
+                                    _,
+                                    mut project,
+                                ) => {
+                                    if key == "Attributes" {
+                                        match changed_value {
+                                            Variant::Attributes(attributes) => {
+                                                for (name, value) in attributes.to_owned() {
+                                                    let unresolved_value =
+                                                        UnresolvedValue::FullyQualified(value);
+                                                    match project_node.attributes.get(&name) {
+                                                        Some(value2) => {
+                                                            if unresolved_value
+                                                                .to_owned()
+                                                                .resolve_unambiguous()
+                                                                .unwrap()
+                                                                != value2
+                                                                    .to_owned()
+                                                                    .resolve_unambiguous()
+                                                                    .unwrap()
+                                                            {
+                                                                let tree = change_attributes_in_project(
+                                                                    &mut project_node.to_owned(),
+                                                                    &mut project.tree,
+                                                                    key.to_owned(),
+                                                                    unresolved_value.to_owned(),
+                                                                );
+                                                                let tree: &_ = tree;
+                                                                project.tree = tree.clone();
+                                                                change_bypass.insert(path.to_path_buf());
+                                                                fs::write(
+                                                                    path.to_owned(),
+                                                                    serde_json::to_string_pretty(&project).unwrap(),
+                                                                )
+                                                                .unwrap();
+                                                                continue;
+                                                            }
+                                                        }
+                                                        None => {}
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    } else {
+                                        let unresolved_value = UnresolvedValue::FullyQualified(
+                                            changed_value.to_owned(),
+                                        );
+                                        if let Some(value2) = project_node.properties.get(key) {
+                                            if unresolved_value
+                                                .to_owned()
+                                                .resolve_unambiguous()
+                                                .unwrap()
+                                                != value2.to_owned().resolve_unambiguous().unwrap()
+                                            {
+                                                let tree = change_property_in_project(
+                                                    &mut project_node.to_owned(),
+                                                    &mut project.tree,
+                                                    key.to_owned(),
+                                                    unresolved_value.to_owned(),
+                                                );
+                                                let tree: &_ = tree;
+                                                project.tree = tree.clone();
+                                                change_bypass.insert(path.to_path_buf());
+                                                fs::write(
+                                                    path.to_owned(),
+                                                    serde_json::to_string_pretty(&project).unwrap(),
+                                                )
+                                                .unwrap();
+                                                continue;
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
-                        InstigatingSource::ProjectNode(_, _, _, _) => {}
-                    }
-
-                    for (key, changed_value) in &update.changed_properties {
-                        if key == "Source" {
-                            if let Some(instigating_source) =
-                                &current_instance.metadata().instigating_source
+                        //TODO put in right place
+                        for path in &instance.metadata().relevant_paths {
+                            if path.file_name_ends_with(".rbxm")
+                                || path.file_name_ends_with(".rbxmx")
                             {
-                                match instigating_source {
-                                    InstigatingSource::Path(path) => {
-                                        if let Some(Variant::String(value)) = changed_value {
-                                            change_bypass.insert(path.to_path_buf());
-
-                                            fs::write(path, value).unwrap();
-                                        } else {
-                                            log::warn!("Cannot change Source to non-string value.");
-                                        }
-                                    }
-                                    InstigatingSource::ProjectNode(path, _, _, _) => {
-                                        println!("{:?}", path);
-                                        log::warn!(
-                                            "Cannot remove instance {:?}, it's from a project file",
-                                            id
-                                        );
-                                    }
+                                if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                    change_bypass.insert(path.to_path_buf());
+                                    rbxm_files_to_update.push((instance.id(), path.clone()));
                                 }
-                            } else {
-                                log::warn!(
-                                    "Cannot update instance {:?}, it is not an instigating source.",
-                                    id
-                                );
-                            }
-                        //TODO Rewrite to be more flexible
-                        } else if current_instance.metadata().relevant_paths.len() >= 2 {
-                            let meta_path = current_instance.metadata().relevant_paths[1].clone();
-                            if meta_path.ends_with("init.meta.json") {
-                                let mut metadata =
-                                    match self.vfs.read(&meta_path).with_not_found().unwrap() {
-                                        Some(meta_contents) => DirectoryMetadata::from_slice(
-                                            &meta_contents,
-                                            meta_path.clone(),
-                                        )
-                                        .unwrap(),
-                                        None => DirectoryMetadata::new(meta_path.clone()),
-                                    };
-                                metadata
-                                    .insert(key.clone(), changed_value.as_ref().unwrap().clone());
-                                let data = serde_json::to_string_pretty(&metadata).unwrap();
-                                change_bypass.insert(meta_path.clone());
-                                fs::write(meta_path, data).unwrap();
-                            } else {
-                                let mut metadata =
-                                match self.vfs.read(&meta_path).with_not_found().unwrap() {
-                                    Some(meta_contents) => AdjacentMetadata::from_slice(
-                                        &meta_contents,
-                                        meta_path.clone(),
-                                    )
-                                    .unwrap(),
-                                    None => AdjacentMetadata::new(meta_path.clone()),
+                                continue 'changed_properties;
+                            } else if path.file_name_ends_with(".lua") && key == "Source" {
+                                if let Some(Variant::String(value)) = changed_value {
+                                    change_bypass.insert(path.to_path_buf());
+
+                                    fs::write(path, value).unwrap();
+                                } else {
+                                    log::warn!("Cannot change Source to non-string value.");
+                                }
+                            } else if path.file_name_ends_with(".meta.json") {
+                                if path.ends_with("init.meta.json") {
+                                    let mut metadata =
+                                        match self.vfs.read(&path).with_not_found().unwrap() {
+                                            Some(meta_contents) => DirectoryMetadata::from_slice(
+                                                &meta_contents,
+                                                path.clone(),
+                                            )
+                                            .unwrap(),
+                                            None => DirectoryMetadata::new(path.clone()),
+                                        };
+                                    metadata.insert(
+                                        key.clone(),
+                                        changed_value.as_ref().unwrap().clone(),
+                                    );
+                                    let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                    change_bypass.insert(path.clone());
+                                    fs::write(path, data).unwrap();
+                                } else {
+                                    let mut metadata =
+                                        match self.vfs.read(&path).with_not_found().unwrap() {
+                                            Some(meta_contents) => AdjacentMetadata::from_slice(
+                                                &meta_contents,
+                                                path.clone(),
+                                            )
+                                            .unwrap(),
+                                            None => AdjacentMetadata::new(path.clone()),
+                                        };
+                                    metadata.insert(
+                                        key.clone(),
+                                        changed_value.as_ref().unwrap().clone(),
+                                    );
+                                    let data = serde_json::to_string_pretty(&metadata).unwrap();
+                                    change_bypass.insert(path.clone());
+                                    fs::write(path, data).unwrap();
                                 };
-                            metadata
-                                .insert(key.clone(), changed_value.as_ref().unwrap().clone());
-                            let data = serde_json::to_string_pretty(&metadata).unwrap();
-                            change_bypass.insert(meta_path.clone());
-                            fs::write(meta_path, data).unwrap();
-                            };
-                        } else {
-                            log::warn!(
-                                "Cannot change properties of instances with no meta support"
-                            );
+                            }
                         }
                     }
                 } else {
@@ -509,7 +563,13 @@ fn compute_and_apply_changes(
             }
         },
 
-        InstigatingSource::ProjectNode(project_path, instance_name, project_node, parent_class) => {
+        InstigatingSource::ProjectNode(
+            project_path,
+            instance_name,
+            project_node,
+            parent_class,
+            project,
+        ) => {
             // This instance is the direct subject of a project node. Since
             // there might be information associated with our instance from
             // the project file, we snapshot the entire project node again.
@@ -522,6 +582,7 @@ fn compute_and_apply_changes(
                 &vfs,
                 parent_class.as_ref().map(|name| name.as_str()),
                 generation_map,
+                project,
             );
 
             let snapshot = match snapshot_result {
@@ -558,4 +619,34 @@ fn write_model(tree: &MutexGuard<RojoTree>, path: &PathBuf, root_id: Ref) -> any
 
 fn xml_encode_config() -> rbx_xml::EncodeOptions {
     rbx_xml::EncodeOptions::new().property_behavior(rbx_xml::EncodePropertyBehavior::WriteUnknown)
+}
+
+fn change_property_in_project<'a>(
+    node: &mut ProjectNode,
+    tree: &'a mut ProjectNode,
+    key: String,
+    value: UnresolvedValue,
+) -> &'a mut ProjectNode {
+    for (_, child) in tree.children.iter_mut() {
+        if child == node {
+            child.properties.insert(key.to_owned(), value.to_owned());
+        }
+        change_property_in_project(node, child, key.to_owned(), value.to_owned());
+    }
+    return tree;
+}
+
+fn change_attributes_in_project<'a>(
+    node: &mut ProjectNode,
+    tree: &'a mut ProjectNode,
+    key: String,
+    value: UnresolvedValue,
+) -> &'a mut ProjectNode {
+    for (_, child) in tree.children.iter_mut() {
+        if child == node {
+            child.properties.insert(key.to_owned(), value.to_owned());
+        }
+        change_property_in_project(node, child, key.to_owned(), value.to_owned());
+    }
+    return tree;
 }

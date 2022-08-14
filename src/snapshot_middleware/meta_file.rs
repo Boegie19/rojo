@@ -53,7 +53,9 @@ impl AdjacentMetadata {
                         let unresolved_value = UnresolvedValue::FullyQualified(value);
                         match self.attributes.get(&name) {
                             Some(value2) => {
-                                if  unresolved_value.to_owned().resolve_unambiguous().unwrap() != value2.to_owned().resolve_unambiguous().unwrap(){
+                                if unresolved_value.to_owned().resolve_unambiguous().unwrap()
+                                    != value2.to_owned().resolve_unambiguous().unwrap()
+                                {
                                     self.attributes.insert(name, unresolved_value);
                                 }
                             }
@@ -167,7 +169,9 @@ impl DirectoryMetadata {
                         let unresolved_value = UnresolvedValue::FullyQualified(value);
                         match self.attributes.get(&name) {
                             Some(value2) => {
-                                if  unresolved_value.to_owned().resolve_unambiguous().unwrap() != value2.to_owned().resolve_unambiguous().unwrap(){
+                                if unresolved_value.to_owned().resolve_unambiguous().unwrap()
+                                    != value2.to_owned().resolve_unambiguous().unwrap()
+                                {
                                     self.attributes.insert(name, unresolved_value);
                                 }
                             }
@@ -185,7 +189,6 @@ impl DirectoryMetadata {
         }
     }
 
-    
     pub fn apply_all(&mut self, snapshot: &mut InstanceSnapshot) -> anyhow::Result<()> {
         self.apply_ignore_unknown_instances(snapshot);
         self.apply_class_name(snapshot)?;

@@ -6,7 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{glob::Glob, path_serializer, project::ProjectNode};
+use crate::{glob::Glob, path_serializer, project::ProjectNode, Project};
 
 /// Rojo-specific metadata that can be associated with an instance or a snapshot
 /// of an instance.
@@ -174,6 +174,7 @@ pub enum InstigatingSource {
         String,
         ProjectNode,
         Option<String>,
+        Project,
     ),
 }
 
@@ -181,7 +182,7 @@ impl fmt::Debug for InstigatingSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             InstigatingSource::Path(path) => write!(formatter, "Path({})", path.display()),
-            InstigatingSource::ProjectNode(path, name, node, parent_class) => write!(
+            InstigatingSource::ProjectNode(path, name, node, parent_class, _) => write!(
                 formatter,
                 "ProjectNode({}: {:?}) from path {} and parent class {:?}",
                 name,
