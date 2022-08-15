@@ -248,7 +248,6 @@ impl JobThreadContext {
                         if let Some(extension) = path.extension() {
                             if extension == "rbxm" || extension == "rbxmx" {
                                 if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
-                                    used_paths.push(path.clone());
                                     change_bypass.insert(path.to_path_buf());
                                     rbxm_files_to_update.push((instance.id(), path.clone()))
                                 }

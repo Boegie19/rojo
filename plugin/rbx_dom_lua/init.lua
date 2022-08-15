@@ -156,12 +156,15 @@ local function findAllNoneDefaultPropertiesEncoded(instance)
 		return false, Error.new(Error.Kind.InvalidInput, errorMessage)
 	end
 	local noneDefaultProperties = {}
-	local properties = readAllReadableProperties(instance)
+	local sucess1, properties = readAllReadableProperties(instance)
+	if not sucess1 then
+		return false, properties
+	end
 	local defaultProperties = findAllDefaultProperties(instance.ClassName)
 	for property ,value in pairs(properties)  do
-		local sucess,enocdedPorperty = EncodedValue.encodeNaive(value)
+		local sucess2,enocdedPorperty = EncodedValue.encodeNaive(value)
 		local defaultProperty = defaultProperties[property]
-		if sucess and defaultProperty then
+		if sucess2 and defaultProperty then
 			if not deepTableEquals(enocdedPorperty,defaultProperty) then
 				noneDefaultProperties[property] = enocdedPorperty
 			end
