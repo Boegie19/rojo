@@ -268,7 +268,7 @@ impl JobThreadContext {
                 let id = update.id;
 
                 if update.changed_name.is_some() {
-                    'changed_name: for new_name in &update.changed_name {
+                    'changed_name: for _ in &update.changed_name {
 
                     let mut instance = tree.get_instance(id).unwrap();
                     let _ = loop {
