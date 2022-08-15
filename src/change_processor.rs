@@ -268,7 +268,32 @@ impl JobThreadContext {
                 let id = update.id;
 
                 if update.changed_name.is_some() {
-                    log::warn!("Cannot rename instances yet.");
+                    'changed_name: for (new_name) in &update.changed_name {
+
+                    let instance = tree.get_instance(id).unwrap();
+                    let instigating_source = loop {
+                        if let Some(instigating_source) = &instance.metadata().instigating_source {
+                            break instigating_source;
+                        }
+                        instance = tree.get_instance(instance.parent()).unwrap();
+                    };
+                    for path in &instance.metadata().relevant_paths {
+                        if path.file_name_ends_with(".rbxm")
+                            || path.file_name_ends_with(".rbxmx")
+                        {
+                            if id == instance.id() {
+                                log::warn!("Cannot change Name of top level rbxm/rbxmx instances.");
+                                continue 'changed_name;
+                            }
+                            if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                used_paths.push(path.clone());
+                                change_bypass.insert(path.to_path_buf());
+                                rbxm_files_to_update.push((instance.id(), path.clone()));
+                            }
+                            continue 'changed_name;
+                        }else{
+                            log::warn!("Cannot change Name of none rbxm/rbxmx object.");
+                        }
                 }
 
                 if update.changed_class_name.is_some() {
@@ -371,7 +396,7 @@ impl JobThreadContext {
                                 }
                             }
                         }
-                        //TODO put in right place
+                        
                         for path in &instance.metadata().relevant_paths {
                             if path.file_name_ends_with(".rbxm")
                                 || path.file_name_ends_with(".rbxmx")
