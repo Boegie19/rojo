@@ -268,10 +268,10 @@ impl JobThreadContext {
                 let id = update.id;
 
                 if update.changed_name.is_some() {
-                    'changed_name: for (new_name) in &update.changed_name {
+                    'changed_name: for new_name in &update.changed_name {
 
-                    let instance = tree.get_instance(id).unwrap();
-                    let instigating_source = loop {
+                    let mut instance = tree.get_instance(id).unwrap();
+                    let _ = loop {
                         if let Some(instigating_source) = &instance.metadata().instigating_source {
                             break instigating_source;
                         }
@@ -294,7 +294,9 @@ impl JobThreadContext {
                         }else{
                             log::warn!("Cannot change Name of none rbxm/rbxmx object.");
                         }
+                    }
                 }
+            }
 
                 if update.changed_class_name.is_some() {
                     log::warn!("Cannot change ClassName yet.");
