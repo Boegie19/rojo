@@ -32,6 +32,8 @@ function InstanceMap.new(onInstanceChanged)
 		-- A map from instances to a signal or list of signals connected to it.
 		createdInstances = {},
 
+		ignoreCreatedInstances = {},
+
 		-- Callback that's invoked whenever an instance is changed and it was
 		-- not paused.
 		onInstanceChanged = onInstanceChanged,
@@ -201,7 +203,10 @@ function InstanceMap:__connectSignals(instance)
 	end
 
 	table.insert(signals,instance.ChildAdded:Connect(function(addedInstance)
-		self:__maybeFireInstanceChanged(addedInstance, "Create")
+		if self.ignoreCreatedInstances[addedInstance] == nil then
+			self:__maybeFireInstanceChanged(addedInstance, "Create")
+		end
+		self.ignoreCreatedInstances[addedInstance] = nil
 	end))
 	
 	self.instancesToSignal[instance] = signals

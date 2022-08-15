@@ -253,7 +253,12 @@ function ServeSession:__mainSyncLoop()
 		:andThen(function(messages)
 			for _, message in ipairs(messages) do
 				if message.guid == self.__guid then
-					continue
+					if #message.added == 0 then
+						continue
+					else
+						message.updated = {}
+						message.removed = {}
+					end
 				end
 				local unappliedPatch = self.__reconciler:applyPatch(message)
 

@@ -112,7 +112,10 @@ function reifyInner(instanceMap, virtualInstances, id, parentInstance, unapplied
 		reifyInner(instanceMap, virtualInstances, childId, instance, unappliedPatch, deferredRefs)
 	end
 
-	instance.Parent = parentInstance
+	if instance.Parent ~= parentInstance then
+		instanceMap.ignoreCreatedInstances[instance] = true
+		instance.Parent = parentInstance
+	end
 	instanceMap:insert(id, instance)
 end
 

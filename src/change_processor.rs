@@ -169,7 +169,9 @@ impl JobThreadContext {
 
         // Notify anyone listening to the message queue about the changes we
         // just made.
-        self.message_queue.push_messages(&applied_patches);
+        if !applied_patches.is_empty() {
+            self.message_queue.push_messages(&applied_patches);
+        }
     }
 
     fn handle_tree_event(&self, patch_set: PatchSet) {
@@ -211,8 +213,8 @@ impl JobThreadContext {
                             InstigatingSource::Path(path) => {
                                 if let Some(extension) = path.extension() {
                                     if extension == "rbxm" || extension == "rbxmx" {
-                                        if !rbxm_files_to_update
-                                            .contains(&(current_instance.id(), path.clone()))
+                                        if !used_paths
+                                            .contains(&path)
                                         {
                                             used_paths.push(path.clone());
                                             change_bypass.insert(path.to_path_buf());
@@ -247,7 +249,10 @@ impl JobThreadContext {
                     InstigatingSource::Path(path) => {
                         if let Some(extension) = path.extension() {
                             if extension == "rbxm" || extension == "rbxmx" {
-                                if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                if !used_paths
+                                .contains(&path)
+                            {
+                                    used_paths.push(path.clone());
                                     change_bypass.insert(path.to_path_buf());
                                     rbxm_files_to_update.push((instance.id(), path.clone()))
                                 }
@@ -402,7 +407,9 @@ impl JobThreadContext {
                             if path.file_name_ends_with(".rbxm")
                                 || path.file_name_ends_with(".rbxmx")
                             {
-                                if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                if !used_paths
+                                .contains(&path)
+                            {
                                     used_paths.push(path.clone());
                                     change_bypass.insert(path.to_path_buf());
                                     rbxm_files_to_update.push((instance.id(), path.clone()));
