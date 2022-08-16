@@ -38,14 +38,14 @@ impl ServeCommand {
         let project_path = resolve_path(&self.project);
 
         let vfs = Vfs::new_default();
-
-        let session = Arc::new(ServeSession::new(vfs, &project_path)?);
+        vfs.set_watch_enabled(false);
+        let session =ServeSession::new(vfs, &project_path)?;
 
         let ip = self
             .address
             .or_else(|| session.serve_address())
             .unwrap_or(DEFAULT_BIND_ADDRESS.into());
-
+        session.set_watch_enabled(true);
         let port = self
             .port
             .or_else(|| session.project_port())
