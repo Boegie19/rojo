@@ -113,7 +113,7 @@ jobs:
           profile: minimal
 
       - name: Setup Aftman
-        uses: Boegie19/setup-aftman@v1.1.0-windows-fix
+        uses: Boegie19/setup-aftman@v1.1.0-windows-fix.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           trust-check: false
