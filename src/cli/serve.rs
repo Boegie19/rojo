@@ -2,7 +2,6 @@ use std::{
     io::{self, Write},
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
-    sync::Arc,
 };
 
 use clap::Parser;
@@ -38,8 +37,8 @@ impl ServeCommand {
         let project_path = resolve_path(&self.project);
 
         let vfs = Vfs::new_default();
-
-        let session = Arc::new(ServeSession::new(vfs, &project_path)?);
+        vfs.set_watch_enabled(false);
+        let mut session = ServeSession::new(vfs, &project_path)?;
 
         let ip = self
             .address
@@ -50,7 +49,7 @@ impl ServeCommand {
             .port
             .or_else(|| session.project_port())
             .unwrap_or(DEFAULT_PORT);
-
+        session.set_watch_enabled(true);
         let server = LiveServer::new(session);
 
         let _ = show_start_message(ip, port, global.color.into());

@@ -213,9 +213,7 @@ impl JobThreadContext {
                             InstigatingSource::Path(path) => {
                                 if let Some(extension) = path.extension() {
                                     if extension == "rbxm" || extension == "rbxmx" {
-                                        if !used_paths
-                                            .contains(&path)
-                                        {
+                                        if !used_paths.contains(&path) {
                                             used_paths.push(path.clone());
                                             change_bypass.insert(path.to_path_buf());
                                             rbxm_files_to_update
@@ -249,9 +247,7 @@ impl JobThreadContext {
                     InstigatingSource::Path(path) => {
                         if let Some(extension) = path.extension() {
                             if extension == "rbxm" || extension == "rbxmx" {
-                                if !used_paths
-                                .contains(&path)
-                            {
+                                if !used_paths.contains(&path) {
                                     used_paths.push(path.clone());
                                     change_bypass.insert(path.to_path_buf());
                                     rbxm_files_to_update.push((instance.id(), path.clone()))
@@ -273,34 +269,37 @@ impl JobThreadContext {
 
                 if update.changed_name.is_some() {
                     'changed_name: for _ in &update.changed_name {
-
-                    let mut instance = tree.get_instance(id).unwrap();
-                    let _ = loop {
-                        if let Some(instigating_source) = &instance.metadata().instigating_source {
-                            break instigating_source;
-                        }
-                        instance = tree.get_instance(instance.parent()).unwrap();
-                    };
-                    for path in &instance.metadata().relevant_paths {
-                        if path.file_name_ends_with(".rbxm")
-                            || path.file_name_ends_with(".rbxmx")
-                        {
-                            if id == instance.id() {
-                                log::warn!("Cannot change Name of top level rbxm/rbxmx instances.");
+                        let mut instance = tree.get_instance(id).unwrap();
+                        let _ = loop {
+                            if let Some(instigating_source) =
+                                &instance.metadata().instigating_source
+                            {
+                                break instigating_source;
+                            }
+                            instance = tree.get_instance(instance.parent()).unwrap();
+                        };
+                        for path in &instance.metadata().relevant_paths {
+                            if path.file_name_ends_with(".rbxm")
+                                || path.file_name_ends_with(".rbxmx")
+                            {
+                                if id == instance.id() {
+                                    log::warn!(
+                                        "Cannot change Name of top level rbxm/rbxmx instances."
+                                    );
+                                    continue 'changed_name;
+                                }
+                                if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
+                                    used_paths.push(path.clone());
+                                    change_bypass.insert(path.to_path_buf());
+                                    rbxm_files_to_update.push((instance.id(), path.clone()));
+                                }
                                 continue 'changed_name;
+                            } else {
+                                log::warn!("Cannot change Name of none rbxm/rbxmx object.");
                             }
-                            if !rbxm_files_to_update.contains(&(instance.id(), path.clone())) {
-                                used_paths.push(path.clone());
-                                change_bypass.insert(path.to_path_buf());
-                                rbxm_files_to_update.push((instance.id(), path.clone()));
-                            }
-                            continue 'changed_name;
-                        }else{
-                            log::warn!("Cannot change Name of none rbxm/rbxmx object.");
                         }
                     }
                 }
-            }
 
                 if update.changed_class_name.is_some() {
                     log::warn!("Cannot change ClassName yet.");
@@ -345,19 +344,25 @@ impl JobThreadContext {
                                                                     .resolve_unambiguous()
                                                                     .unwrap()
                                                             {
-                                                                let tree = change_attributes_in_project(
-                                                                    &mut project_node.to_owned(),
-                                                                    &mut project.tree,
-                                                                    key.to_owned(),
-                                                                    unresolved_value.to_owned(),
-                                                                );
+                                                                let tree =
+                                                                    change_attributes_in_project(
+                                                                        &mut project_node
+                                                                            .to_owned(),
+                                                                        &mut project.tree,
+                                                                        key.to_owned(),
+                                                                        unresolved_value.to_owned(),
+                                                                    );
                                                                 let tree: &_ = tree;
                                                                 project.tree = tree.clone();
                                                                 used_paths.push(path.clone());
-                                                                change_bypass.insert(path.to_path_buf());
+                                                                change_bypass
+                                                                    .insert(path.to_path_buf());
                                                                 fs::write(
                                                                     path.to_owned(),
-                                                                    serde_json::to_string_pretty(&project).unwrap(),
+                                                                    serde_json::to_string_pretty(
+                                                                        &project,
+                                                                    )
+                                                                    .unwrap(),
                                                                 )
                                                                 .unwrap();
                                                                 continue;
@@ -402,14 +407,12 @@ impl JobThreadContext {
                                 }
                             }
                         }
-                        
+
                         for path in &instance.metadata().relevant_paths {
                             if path.file_name_ends_with(".rbxm")
                                 || path.file_name_ends_with(".rbxmx")
                             {
-                                if !used_paths
-                                .contains(&path)
-                            {
+                                if !used_paths.contains(&path) {
                                     used_paths.push(path.clone());
                                     change_bypass.insert(path.to_path_buf());
                                     rbxm_files_to_update.push((instance.id(), path.clone()));
@@ -474,7 +477,7 @@ impl JobThreadContext {
 
             for (id, path) in rbxm_files_to_update {
                 match write_model(&tree, &path, id) {
-                    Ok(_) => { }
+                    Ok(_) => {}
                     Err(error) => {
                         log::warn!(
                             "Cannot update rbxm or rbxml at path {:?}, because of error: {:?}.",
@@ -491,11 +494,13 @@ impl JobThreadContext {
             self.message_queue.push_messages(&[applied_patch]);
         }
 
-        let  mut applied_patches =  Vec::new();
+        let mut applied_patches = Vec::new();
         for path in used_paths {
-            let affected_ids =  tree.get_ids_at_path(&path.as_path()).to_vec();
+            let affected_ids = tree.get_ids_at_path(&path.as_path()).to_vec();
             for id in affected_ids {
-                if let Some(patch) = compute_and_apply_changes(&mut tree, &self.vfs, &mut generation_map, id) {
+                if let Some(patch) =
+                    compute_and_apply_changes(&mut tree, &self.vfs, &mut generation_map, id)
+                {
                     if !patch.is_empty() {
                         applied_patches.push(patch);
                     }
