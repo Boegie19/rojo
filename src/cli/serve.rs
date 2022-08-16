@@ -39,7 +39,7 @@ impl ServeCommand {
 
         let vfs = Vfs::new_default();
         vfs.set_watch_enabled(false);
-        let session =ServeSession::new(vfs, &project_path)?;
+        let mut session =ServeSession::new(vfs, &project_path)?;
 
         let ip = self
             .address
