@@ -23,4 +23,3 @@ jobs:
     - name: run wally version
       run: |
         wally --version
-      shell: bash
